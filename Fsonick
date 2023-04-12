@@ -1,0 +1,198 @@
+# -*- coding: utf-8 -*-
+from __future__ import absolute_import, division, print_function, unicode_literals
+from asyncio import sleep
+from asyncio.log import logger
+from signal import alarm
+import struct
+import time
+from battery import Protection, Battery, Cell
+from util_max17853 import data_cycle
+from utils import *
+from struct import *
+
+
+# Você deve começar fazendo uma cópia do Battery_template.py e nomeando-o para o seu BMS.
+# O modelo é um pequeno exemplo de implementação. Em teoria, este é o único arquivo que
+# você precisará editar para adicionar seu BMS, exceto ao adicionar este novo arquivo como
+# referência ao programa principalS.
+# Para começar você só precisa do número de células, o soc, corrente e voltagem. Depois de
+# ler isso, o driver já deve estar
+# funcionando
+
+class Fsonick(Battery):
+
+    def __init__(self, port, baud):
+        super(Fsonick, self).__init__(port, baud)
+        self.type = self.BATTERYTYPE
+        self.poll_interval = 10000
+        self.poll_step = 0
+
+    # LENGTH_POS será a posição do byte do seu campo Byte Cound e LENGTH_CHECK é quantos bytes
+    # tem todas as coisas fora do pacote de dados.
+
+    logger.warning('Testing Hello word PTI')
+    BATTERYTYPE = "Fsonick"
+    LENGTH_CHECK = 5
+    LENGTH_POS = 3
+    MAX_CHARGE_VOLTAGE = 56
+    MIN_BATTERY_VOLTAGE = 42
+    MAX_BATTERY_CURRENT = 30
+    MAX_BATTERY_DISCHARGE_CURRENT = 30
+
+    def test_connection(self):
+        return self.command_id()
+    
+    def get_settings(self):
+        # After successful  connection get_settings will be call to set up the battery.
+        # Set the current limits, populate cell count, etc
+        # Return True if success, False for failure
+        print(">>>>>>>>>>>>>>>>>>>>>>>>>>>   11 ESTAMOS EM GET SETTINGS >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
+        #self.read_soc()
+        self.command_id()
+        #MAX_BATTERY_CURRENT = max_currente
+        #MAX_BATTERY_DISCHARGE_CURRENT = max_discharge
+        MAX_CELL_VOLTAGE = 250
+        MIN_CELL_VOLTAGE = 240
+        #self.max_battery_current = MAX_BATTERY_CURRENT
+        #self.max_battery_discharge_current = MAX_BATTERY_DISCHARGE_CURRENT
+
+        self.max_battery_voltage = MAX_CELL_VOLTAGE * self.cell_count
+        self.min_battery_voltage = MIN_CELL_VOLTAGE * self.cell_count
+        return True
+    
+    def refresh_data(self):
+        print(">>>>>>>>>>>>>>>>>>>>>>>>>>>   6 Estamos em REFRESH DATA >>>>>>>>>>>>>>>>>>>>")
+        # call all functions that will refresh the battery data.
+        # This will be called for every iteration (1 second)
+        # Return True if success, False for failure
+        if self.poll_step ==0:
+            print ("Poll step =", self.poll_step)
+            result = self.command_id()
+
+        """
+            
+        elif self.poll_step == 1:
+            print ("Poll step =", self.poll_step)
+            result = self.read_alarm()
+               
+        elif self.poll_step == 2:
+            result = self.read_mode()
+            self.poll_step = -1
+
+        self.poll_step += 1
+        print ("Poll step =", self.poll_step)
+        """   
+        return result
+
+    def read_serial_data_fsonick(self, command):
+        data = read_serial_data(command, self.port, self.baud_rate, self.LENGTH_POS, self.LENGTH_CHECK)
+        if data is False:
+            sleep(0.2)
+            return False
+
+        if data is None:
+            sleep(0.2)
+            return False
+
+        id, funcao, length = unpack_from(">BBB", data)
+        crc = self.calculate_crc(data[:-2])
+
+        if funcao == 3 and data[-2:] == crc:
+            print(">>>>>>>>>>>>>>>>>>>>>>>>>>>  5 Recebemos data em read_serial_data")
+            print('id', id)
+            print("funcao", funcao)
+            print("length", length)
+            print('comando de leitura =', command)
+            print('data', data)
+            print('Tamanho da data =', len(data))
+            return data
+        else:
+            logger.error(">>> ERRO: incorreto >>> PTI")
+
+    def calculate_crc(self, data):
+        """
+        Calcula o CRC de uma mensagem Modbus RTU.
+
+        Args:
+            data (bytes): Mensagem Modbus RTU a ser calculada.
+
+        Returns:
+            bytes: Valor CRC calculado.
+        """
+        crc = 0xFFFF
+        for b in data:
+            crc ^= b
+            for _ in range(8):
+                if crc & 0x0001:
+                    crc >>= 1
+                    crc ^= 0xA001
+                else:
+                    crc >>= 1
+        return crc.to_bytes(2, byteorder='little')
+
+    def command_id(self):
+        valid_ids = []
+        
+        for id in range(1, 4):
+            if self.test_connection(id):
+                valid_ids.append(id)
+                print (f"Dispositivos encontrados ID`s: {valid_ids}")
+        
+        if not valid_ids:
+            print("Nenhum dispositivo encontrado.")
+            return
+        
+        for id in valid_ids:
+            command = b"\x01\x03\x00\x00\x00\x0B" + self.calculate_crc(b"\x01\x03\x00\x00\x00\x0B")
+            command = command[:0] + bytes([id]) + command[1:5] + self.calculate_crc(command[:6] + bytes([id]))
+            data = self.read_serial_data_fsonick(command)
+            
+            if not data:
+                print(f"Erro na leitura do dispositivo {id}.")
+            else:
+                print(f"Dados do dispositivo {id}: {data}")
+
+        print (">>>>>>>>>>>>>>>>>>>>>>>>>>>   6  estamos em em read_geral, all_data =", data)
+        
+        id, funcao, length, tensao, corrente, potencia, soc, soh, chargeH, chargeL, tempmedia, temp1,\
+        temp2, temp3 = unpack_from(">BBBHHHHHHHHHHH", data)
+
+        self.id = id
+        self.funcao = funcao
+        self.length = length
+        self.voltage = tensao / 100
+        print('############# tensao =', tensao/100, "V")
+        self.current = (corrente / 100)
+        print('############# corrente =', self.current, "A")    
+        self.soc = soc / 10
+        print('############# SOC =', self.soc, "%")
+        self.soh = soh / 10
+        self.temp1 = tempmedia / 10
+        print ("############# temperatura interna =", self.temp1, "®C")
+        self.temps1 = temp1 /10
+        self.temps2 = temp2 /10
+        self.temps3 = temp3 /10
+
+        #Criamos uma list para pegar a maior temperatura entre os 3 sensores
+        list1 = [self.temps1, self.temps2, self.temps3]
+        temp_max = max(list1)
+        indexmax = list1.index(temp_max)
+        self.temp2 = indexmax
+
+        print ("############ temperaturas", self.temps1, self.temps2, self.temps3, self.temp2)
+
+        cell_count = 1
+        self.cell_count = cell_count
+        MAX_BATTERY_DISCHARGE_CURRENT = 30
+        MAX_BATTERY_CURRENT = 30
+        self.max_battery_current = MAX_BATTERY_CURRENT
+        self.max_battery_discharge_current = MAX_BATTERY_DISCHARGE_CURRENT
+        self.max_battery_charge_current = MAX_BATTERY_CURRENT
+        #cell_count = 8
+        #self.cell_count = cell_count
+        #logger.warning ("valores lidos", self.id, self.length, self.voltage, self.current, self.cell_count)
+
+        return True
+
+               
+
