@@ -131,26 +131,24 @@ class Fsonick(Battery):
         return crc.to_bytes(2, byteorder='little')
 
     def command_id(self):
-        valid_ids = []
-        
-        for id in range(1, 4):
-            if self.test_connection(id):
-                valid_ids.append(id)
-                print (f"Dispositivos encontrados ID`s: {valid_ids}")
-        
-        if not valid_ids:
-            print("Nenhum dispositivo encontrado.")
-            return
-        
-        for id in valid_ids:
-            command = b"\x01\x03\x00\x00\x00\x0B" + self.calculate_crc(b"\x01\x03\x00\x00\x00\x0B")
-            command = command[:0] + bytes([id]) + command[1:5] + self.calculate_crc(command[:6] + bytes([id]))
+        ids = [1, 2, 3]
+
+        # Iterando sobre os IDs e chamando a função read_serial_data_fsonick para cada ID
+        for id in ids:
+            # Criando o comando com o ID atual
+            command = b"\x01\x03\x00\x00\x00\x0B" + bytes([id]) + b"\x00\x0B" + self.calculate_crc(b"\x01\x03\x00\x00\x00\x0B" + bytes([id]) + b"\x00\x0B")
+
+            # Chamando a função read_serial_data_fsonick com o comando atual
             data = self.read_serial_data_fsonick(command)
-            
+
+            # Verificando se houve erro na leitura
             if not data:
-                print(f"Erro na leitura do dispositivo {id}.")
+                print(f"Erro na leitura do dispositivo {id}")
+                print(f"frame enviado {id}: {command}")
             else:
                 print(f"Dados do dispositivo {id}: {data}")
+                print(f"ID do dispositivo: {id}")
+
 
         print (">>>>>>>>>>>>>>>>>>>>>>>>>>>   6  estamos em em read_geral, all_data =", data)
         
