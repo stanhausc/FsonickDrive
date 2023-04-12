@@ -91,6 +91,31 @@ class Fsonick(Battery):
         """   
         return result
 
+    def read_serial_data_fsonick(self, command):
+        data = read_serial_data(command, self.port, self.baud_rate, self.LENGTH_POS, self.LENGTH_CHECK)
+        if data is False:
+            sleep(0.2)
+            return False
+
+        if data is None:
+            sleep(0.2)
+            return False
+
+        id, funcao, length = unpack_from(">BBB", data)
+        crc = self.calculate_crc(data[:-2])
+
+        if funcao == 3 and data[-2:] == crc:
+            print(">>>>>>>>>>>>>>>>>>>>>>>>>>>  5 Recebemos data em read_serial_data")
+            print('id', id)
+            print("funcao", funcao)
+            print("length", length)
+            print('comando de leitura =', command)
+            print('data', data)
+            print('Tamanho da data =', len(data))
+            return data
+        else:
+            logger.error(">>> ERRO: incorreto >>> PTI")
+
     def calculate_crc(self, data):
         """
         Calcula o CRC de uma mensagem Modbus RTU.
@@ -112,35 +137,27 @@ class Fsonick(Battery):
                     crc >>= 1
         return crc.to_bytes(2, byteorder='little')
 
-    def read_serial_data_fsonick(self, command):
-        self.ser.write(command)
-        time.sleep(0.1)
-        if self.ser.in_waiting:
-            response = self.ser.read_all()
-            return response[3:-2]
-        else:
-            return None
-
     def command_id(self):
         ids = [1, 2, 3]
 
-        # Iterando sobre os IDs e chamando a função read_serial_data_fsonick para cada ID
+        # Iterating over the IDs and calling the read_serial_data_fsonick function for each ID
         for id in ids:
-            # Criando o comando com o ID atual
-            command = b'\x01\x03\x00\x00\x00\x0B\x04\x0D'
+            # Creating the command with the current ID
+            command = bytearray(b'\x01\x03\x00\x00\x00\x0B')
+            command[0] = id
+            crc = self.calculate_crc(command)
+            command += crc
 
-            # Substituindo o ID no comando
-            command = command[:0] + bytes([id]) + command[1:]
-
-            # Chamando a função read_serial_data_fsonick com o comando atual
+            # Calling the read_serial_data_fsonick function with the current command
             data = self.read_serial_data_fsonick(command)
 
-            # Verificando se houve erro na leitura
+            # Checking if there was an error in the read
             if not data:
-                print(f"Erro na leitura do dispositivo {id}")
-                print(f"frame enviado {id}: {command}")
+                print(f"Error reading device {id}")
+                print(f"Command sent to device {id}: {command}")
             else:
-                print(f"Dados do dispositivo {id}: {data}")
+                print(f"Data from device {id}: {data}")
+
         print (">>>>>>>>>>>>>>>>>>>>>>>>>>>   6  estamos em em read_geral, all_data =", data)
         
         id, funcao, length, tensao, corrente, potencia, soc, soh, chargeH, chargeL, tempmedia, temp1,\
@@ -184,3 +201,4 @@ class Fsonick(Battery):
         return True
 
                
+
