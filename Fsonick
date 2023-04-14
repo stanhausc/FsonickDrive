@@ -10,27 +10,26 @@ from util_max17853 import data_cycle
 from utils import *
 from struct import *
 
-
-# Você deve começar fazendo uma cópia do Battery_template.py e nomeando-o para o seu BMS.
-# O modelo é um pequeno exemplo de implementação. Em teoria, este é o único arquivo que
-# você precisará editar para adicionar seu BMS, exceto ao adicionar este novo arquivo como
-# referência ao programa principalS.
-# Para começar você só precisa do número de células, o soc, corrente e voltagem. Depois de
-# ler isso, o driver já deve estar
-# funcionando
-
 class Fsonick(Battery):
 
     def __init__(self, port, baud):
         super(Fsonick, self).__init__(port, baud)
         self.type = self.BATTERYTYPE
-        self.poll_interval = 10000
+        self.poll_interval = 5000
         self.poll_step = 0
+        self.voltage1 = None
+        self.voltage2 = None
+        self.current1 = None
+        self.current2 = None
+        self.soc1 = None
+        self.soc2 = None
+        self.tempmedia1 = None
+        self.tempmedia2 = None
 
     # LENGTH_POS será a posição do byte do seu campo Byte Cound e LENGTH_CHECK é quantos bytes
     # tem todas as coisas fora do pacote de dados.
 
-    logger.warning('Testing Hello word PTI')
+    logger.warning('Testing Hello word PTI ###### Rede Modbus')
     BATTERYTYPE = "Fsonick"
     LENGTH_CHECK = 5
     LENGTH_POS = 3
@@ -39,6 +38,37 @@ class Fsonick(Battery):
     MAX_BATTERY_CURRENT = 30
     MAX_BATTERY_DISCHARGE_CURRENT = 30
 
+
+
+    # Frame de leitura
+    # ID    Funçao  endereço(hi)  Endereço(low)  Reg(hi)   Reg(lo) CRC(low) CRC(High)
+    # 0x01  0x03    0x00          0x00           0x00       0xFF
+    #command_geral = b"\x01\x03\x00\x00\x00\x05\xC9\x85"
+    # 0x01 0x03 0x00 0x00 0x00 0x05 0xC985
+    #command_numero_cell = b'\x01\x03\x00\x24\x00\x01\xC4\x01'
+    #SOC $01$03$00$03$00$01$74$0A
+    #command_soc = b"\x01\x03\x00\x03\x00\x01\x74\x0A"
+    #command_temp = b"\x01\x03\x00\x12\x00\x03\xA5\xCE"
+    # tensao 0x01 0x03 0x00 0x00 0x00 0x01 0x84 0x0A
+    #command_tensao = b"\x01\x03\x00\x00\x00\x01\x84\x0A"
+    #corrente $01$03$00$01$00$01$D5$CA
+    #command_corrente = b"\x01\x03\x00\x01\x00\x01\xD5\xCA"
+    #command_alarm = b"\x01\x03\x00\x19\x00\x04\x95\xCE"
+    #ler todos 01030000000585C9
+    #command_geral = b"\x01\x03\x00\x00\x00\x05\x85\xC9" desatualizado, modificara os Regs
+    command_geral_id1 = b"\x01\x03\x00\x00\x00\x0B\x04\x0D"
+    command_geral_id2 = b"\x02\x03\x00\x00\x00\x0B\x04\x3E"
+    #command_alarme = b"\x01\x03\x00\x11\x00\x08\x14\x09"
+    command_mode_id1 = b"\x01\x03\x00\x22\x00\x04\xE4\x03"
+    command_mode_id2 = b"\x02\x03\x00\x22\x00\x04\xE4\x30"
+
+    
+
+    # Renomeie a classe BatteryTemplate para seu BMS e então você precisa usar as 3 funções
+    # principais que são implementadas para ler e preencher dados para seu BMS.
+    # (test_connection, get_settings & refresh_data)
+    # Essas funções são chamadas em momentos diferentes.
+
     def test_connection(self):
 
         # Essa função está relacionado a função read_serial_data_lifepo4 ((crc, start bytes, etc)
@@ -46,146 +76,72 @@ class Fsonick(Battery):
         # call a function that will connect to the battery, send a command and retrieve the result.
         # The result or call should be unique to this BMS. Battery name or version, etc.
         # Return True if success, False for failure
-        print(">>>>>>>>>>>>>>>>>>>>>>>>>>>   2 Estamos em test_connection >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
 
-        return self.command_id()
+        return self.read_mode_id1() and self.read_mode_id2()
+
     def get_settings(self):
         # After successful  connection get_settings will be call to set up the battery.
         # Set the current limits, populate cell count, etc
         # Return True if success, False for failure
-        print(">>>>>>>>>>>>>>>>>>>>>>>>>>>   11 ESTAMOS EM GET SETTINGS >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
-        #self.read_soc()
-        self.command_id()
         #MAX_BATTERY_CURRENT = max_currente
         #MAX_BATTERY_DISCHARGE_CURRENT = max_discharge
         MAX_CELL_VOLTAGE = 250
         MIN_CELL_VOLTAGE = 240
         #self.max_battery_current = MAX_BATTERY_CURRENT
         #self.max_battery_discharge_current = MAX_BATTERY_DISCHARGE_CURRENT
-
+        self.read_geral_id1()
+        self.read_geral_id2()
+        self.calcular_media()
+        cellcount = 1
+        self.cell_count = cellcount
         self.max_battery_voltage = MAX_CELL_VOLTAGE * self.cell_count
         self.min_battery_voltage = MIN_CELL_VOLTAGE * self.cell_count
         return True
     
     def refresh_data(self):
-        print(">>>>>>>>>>>>>>>>>>>>>>>>>>>   6 Estamos em REFRESH DATA >>>>>>>>>>>>>>>>>>>>")
-        # call all functions that will refresh the battery data.
-        # This will be called for every iteration (1 second)
-        # Return True if success, False for failure
-        if self.poll_step ==0:
-            print ("Poll step =", self.poll_step)
-            result = self.command_id()
+        result = False
+        result = self.read_geral_id1()
+        #result = result and self.read_cell_voltage_range_data(ser)
 
-        """
-            
+        if self.poll_step == 0:
+            result = result and self.read_geral_id2()
         elif self.poll_step == 1:
-            print ("Poll step =", self.poll_step)
-            result = self.read_alarm()
-               
-        elif self.poll_step == 2:
-            result = self.read_mode()
+            result = result and self.calcular_media()
+                        
+        #else:          # A placeholder to remind this is the last step. Add any additional steps before here
+            # This is last step so reset poll_step
             self.poll_step = -1
 
         self.poll_step += 1
-        print ("Poll step =", self.poll_step)
-        """   
+            
+
         return result
-
-    def read_serial_data_fsonick(self, command):
-        data = read_serial_data(command, self.port, self.baud_rate, self.LENGTH_POS, self.LENGTH_CHECK)
-        if data is False:
-            sleep(0.2)
-            return False
-
-        if data is None:
-            sleep(0.2)
-            return False
-
-        id, funcao, length = unpack_from(">BBB", data)
-        crc = self.calculate_crc(data[:-2])
-
-        if funcao == 3 and data[-2:] == crc:
-            print(">>>>>>>>>>>>>>>>>>>>>>>>>>>  5 Recebemos data em read_serial_data")
-            print('id', id)
-            print("funcao", funcao)
-            print("length", length)
-            print('comando de leitura =', command)
-            print('data', data)
-            print('Tamanho da data =', len(data))
-            return data
-        else:
-            logger.error(">>> ERRO: incorreto >>> PTI")
-
-    def calculate_crc(self, data):
-        """
-        Calcula o CRC de uma mensagem Modbus RTU.
-
-        Args:
-            data (bytes): Mensagem Modbus RTU a ser calculada.
-
-        Returns:
-            bytes: Valor CRC calculado.
-        """
-        crc = 0xFFFF
-        for b in data:
-            crc ^= b
-            for _ in range(8):
-                if crc & 0x0001:
-                    crc >>= 1
-                    crc ^= 0xA001
-                else:
-                    crc >>= 1
-        return crc.to_bytes(2, byteorder='little')
-
-    def command_id(self):
-        ids = [1, 2, 3]
-
-        # Iterating over the IDs and calling the read_serial_data_fsonick function for each ID
-        for id in ids:
-            # Creating the command with the current ID
-            command = bytearray(b'\x01\x03\x00\x00\x00\x0B')
-            command[0] = id
-            crc = self.calculate_crc(command)
-            command += crc
-
-            # Calling the read_serial_data_fsonick function with the current command
-            data = self.read_serial_data_fsonick(command)
-
-            # Checking if there was an error in the read
-            if not data:
-                print(f"Error reading device {id}")
-                print(f"Command sent to device {id}: {command}")
-            else:
-                print(f"Data from device {id}: {data}")
-
-        print (">>>>>>>>>>>>>>>>>>>>>>>>>>>   6  estamos em em read_geral, all_data =", data)
         
-        id, funcao, length, tensao, corrente, potencia, soc, soh, chargeH, chargeL, tempmedia, temp1,\
-        temp2, temp3 = unpack_from(">BBBHHHHHHHHHHH", data)
+    def read_geral_id1(self):
+        count = 0
+        all_data1 = self.read_serial_data_fsonick(self.command_geral_id1)
+        while all_data1 is False:
+            all_data1 = self.read_serial_data_fsonick(self.command_geral_id1)
+            count += 1
+            if count > 50:
+                logger.error(f">>> ERROR: No reply read_geral ID 1 >>>>> {count}")
+                return False
+                
+        id1, funcao, length, tensao1, corrente1, potencia, chargeH, chargeL, soc1, soh, tempmedia1 = unpack_from(">BBBHHHHHHHH", all_data1)
 
-        self.id = id
-        self.funcao = funcao
-        self.length = length
-        self.voltage = tensao / 100
-        print('############# tensao =', tensao/100, "V")
-        self.current = (corrente / 100)
-        print('############# corrente =', self.current, "A")    
-        self.soc = soc / 10
-        print('############# SOC =', self.soc, "%")
-        self.soh = soh / 10
-        self.temp1 = tempmedia / 10
-        print ("############# temperatura interna =", self.temp1, "®C")
-        self.temps1 = temp1 /10
-        self.temps2 = temp2 /10
-        self.temps3 = temp3 /10
-
-        #Criamos uma list para pegar a maior temperatura entre os 3 sensores
-        list1 = [self.temps1, self.temps2, self.temps3]
-        temp_max = max(list1)
-        indexmax = list1.index(temp_max)
-        self.temp2 = indexmax
-
-        print ("############ temperaturas", self.temps1, self.temps2, self.temps3, self.temp2)
+        self.id1 = id1
+        print('############# ID =', self.id1, "BMS")
+        self.voltage1 = (tensao1 / 50)
+        print('############# tensao =', tensao1, self.voltage1, "V")
+        print(f'############# Corrente Hexadecimal: {corrente1}')
+        self.current1 = (corrente1 / 100)
+        print('############# corrente =', self.current1, "A")
+        print(f'############# SOC Hexadecimal: {soc1}')
+        self.soc1 = soc1 / 10
+        print('############# SOC =', self.soc1, "%")
+        #self.soh1 = soh / 10
+        self.tempmedia1 = tempmedia1 / 10
+        print ("############# temperatura interna =", self.tempmedia1, "°C")
 
         cell_count = 1
         self.cell_count = cell_count
@@ -194,11 +150,124 @@ class Fsonick(Battery):
         self.max_battery_current = MAX_BATTERY_CURRENT
         self.max_battery_discharge_current = MAX_BATTERY_DISCHARGE_CURRENT
         self.max_battery_charge_current = MAX_BATTERY_CURRENT
-        #cell_count = 8
-        #self.cell_count = cell_count
-        #logger.warning ("valores lidos", self.id, self.length, self.voltage, self.current, self.cell_count)
+
+        return True
+    
+    def read_geral_id2(self):
+        count = 0
+        all_data2 = self.read_serial_data_fsonick(self.command_geral_id2)
+        while all_data2 is False:
+            all_data2 = self.read_serial_data_fsonick(self.command_geral_id2)
+            count += 1
+            if count > 50:
+                logger.error(f">>> ERROR: No reply read_geral ID 2 >>>>> {count}")
+                return False
+                
+        id2, funcao, length, tensao2, corrente2, potencia, chargeH, chargeL, soc2, soh, tempmedia2 = unpack_from(">BBBHHHHHHHH", all_data2)
+        self.id = id2
+        print('############# ID =', self.id, "BMS")
+        self.voltage2 = (tensao2 / 50)
+        print('############# tensao =', tensao2, self.voltage2, "V")
+        print(f'############# Corrente Hexadecimal: {corrente2}')
+        self.current2 = (corrente2 / 100)
+        print('############# corrente =', self.current2, "A")
+        print(f'############# SOC Hexadecimal: {soc2}')
+        self.soc2 = (soc2 / 10)
+        print('############# SOC =', self.soc2, "%")
+        #self.soh2 = soh / 10
+        self.tempmedia2 = tempmedia2 / 10
+        print ("############# temperatura interna =", self.tempmedia2, "°C")
+
+        cell_count = 1
+        self.cell_count = cell_count
+        MAX_BATTERY_DISCHARGE_CURRENT = 30
+        MAX_BATTERY_CURRENT = 30
+        self.max_battery_current = MAX_BATTERY_CURRENT
+        self.max_battery_discharge_current = MAX_BATTERY_DISCHARGE_CURRENT
+        self.max_battery_charge_current = MAX_BATTERY_CURRENT
+
+        return True
+    
+    def calcular_media(self):
+        # if self.voltage1 is None:
+        #     self.read_geral_id1()
+        # if self.voltage2 is None:
+        #     self.read_geral_id2()
+        # if self.current1 is None:
+        #     self.read_geral_id1()
+        # if self.current2 is None:
+        #     self.read_geral_id2()
+        # if self.soc1 is None:
+        #     self.read_geral_id1()
+        # if self.soc2 is None:
+        #     self.read_geral_id2()
+        
+        self.voltage = (self.voltage1 + self.voltage2) / 2
+        self.current = (self.current1 + self.current2)
+        self.soc = (self.soc1 + self.soc2) / 2
+        self.temp2 = max([self.tempmedia1, self.tempmedia2])
 
         return True
 
-               
 
+    def read_serial_data_fsonick(self, command):
+        data_length = 0
+        length = 0
+        CRC_length = 2
+        id_length = 1
+        function_length = 1
+
+        while data_length < length + CRC_length + id_length + function_length:
+            data = read_serial_data(command, self.port, self.baud_rate, self.LENGTH_POS, self.LENGTH_CHECK)
+            if data is False:
+                return False
+            if data is None:
+                return False
+            data_length = len(data)
+            id, funcao, length = unpack_from(">BBB", data)
+                
+        if funcao == 3:
+            # print(">>>>>>>>>>>>>>>>>>>>>>>>>>>  5 Recebemos data em read_serial_data")
+            # print('id', id)
+            # print("funcao", funcao)
+            # print("length", length)
+            print('comando de leitura =', command)
+            print('data', data)
+            print('Tamanho da data =', length)
+            return data
+        else:
+            logger.error(">>> ERRO: incorreto >>> PTI")
+            return False
+        # Mensagem recebida (ID)(funcao)(2*comprimeto ou length)(data)(CRC)
+
+# O MODBUS trabalha com data frames que é um conjunto de bytes que está estruturado
+# de forma a transferir os dados. Cada quadro tem um indicador de início e fim e
+# para o JKBMS o início é de 2 bytes (em hexadecimal 4E e 57) e o final é de 1 byte
+# (em hexadecimal 68). Portanto, este pedaço de código está verificando se recebemos
+# uma resposta válida do JKBMS. Isso, juntamente com o CRC, nos mostrará que foram
+# recebidos dados válidos que podemos usar.
+
+# return data[4:length + 4] é usado para fatiar a data, pegar somente os dados que quiser
+# https://pt.stackoverflow.com/questions/110054/como-funciona-a-atribui%C3%A7%C3%A3o-de-lista-usando-intervalo/110256#110256
+
+    def read_mode_id1(self):
+        count = 0
+        all_data = self.read_serial_data_fsonick(self.command_mode_id1)
+        while all_data is False:
+            all_data = self.read_serial_data_fsonick(self.command_mode_id1)
+            count += 1
+            if count > 150:
+                logger.error(">>> ERROR: No reply read_mode", count)
+                return False
+        return True
+    
+    def read_mode_id2(self):
+        count = 0
+        all_data = self.read_serial_data_fsonick(self.command_mode_id2)
+        while all_data is False:
+            all_data = self.read_serial_data_fsonick(self.command_mode_id2)
+            count += 1
+            if count > 150:
+                logger.error(">>> ERROR: No reply read_mode", count)
+                return False
+        return True
